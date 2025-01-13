@@ -9,14 +9,14 @@ import {ERC4626Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC2
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {Governable} from "../common/Governable.sol";
-import {Storage} from "../impl/Storage.sol";
+import {SingleSideStorage} from "../impl/SingleSideStorage.sol";
 
-abstract contract BaseVault is Governable, Storage, PausableUpgradeable, ERC4626Upgradeable {
+abstract contract SingleSideBaseVault is Governable, SingleSideStorage, PausableUpgradeable, ERC4626Upgradeable {
     using Math for uint256;
 
     uint256 internal constant BIPS_DIVISOR = 10000;
 
-    function __BaseVaultInit(address _asset, string memory _name, string memory _symbol, address _owner, address _governor) internal{
+    function __SingleSideBaseVaultInit(address _asset, string memory _name, string memory _symbol, address _owner, address _governor) internal{
         __ERC4626_init(IERC20Metadata(_asset));
         __ERC20_init(_name, _symbol);
         __Pausable_init();
@@ -87,13 +87,10 @@ abstract contract BaseVault is Governable, Storage, PausableUpgradeable, ERC4626
     // View function to override ERC-4626 totalAssets().
     function totalAssets() public view virtual override returns (uint256) {
         uint256 underlying = IERC20(asset()).balanceOf(address(this));
-        return underlying + balanceOfPool();
+        return underlying;
     }
 
-    // it calculates how much 'want' the strategy has working in the farm.
-    function balanceOfPool() public view returns (uint256) {
-        return stakingContract.balanceOf(address(this));
-    }
+
 
     // ============================= Internal functions ================================ //
     /**

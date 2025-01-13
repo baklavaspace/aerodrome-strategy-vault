@@ -16,7 +16,7 @@ import {IVelodromeGauge} from "../interfaces/aerodrome/IVelodromeGauge.sol";
  *
  * @dev Storage contract. Contains or inherits from all contract with storage.
  */
-abstract contract Storage is
+abstract contract SingleSideStorage is
     AccessControlUpgradeable,
     ReentrancyGuardUpgradeable
 {
@@ -38,25 +38,28 @@ abstract contract Storage is
     // ============ Staking Strategy setting ============
     
     /// @dev The staking farm contract 
-    IVelodromeGauge public stakingContract;
+    // IVelodromeGauge public stakingContract;
 
     /// @dev The fx swap router
-    ISolidlyRouter public router;
+    // ISolidlyRouter public router;
 
     /// @dev The staking farm reward token.
-    IERC20 public poolRewardToken;
+    // IERC20 public poolRewardToken;
 
     /// @dev The staking farm pool's bonus reward token.
-    IERC20[] public bonusRewardTokens;
+    // IERC20[] public bonusRewardTokens;
 
     /// @dev The staking farm poolId
-    uint256 public stakingFarmID;
+    // uint256 public stakingFarmID;
 
     /// @dev The minimum reward tokens to reinvest.
-    uint256 public minTokensToReinvest;
+    // uint256 public minTokensToReinvest;
 
     /// @dev Indicates whether a deposit is restricted.
     bool public depositsEnabled;
+
+    /// @dev Indicates whether a restaking to farm is restricted.
+    // bool public restakingEnabled;
 
 
     // ============ Fee setting ============
@@ -72,15 +75,13 @@ abstract contract Storage is
 
     // ============ Compound Strategy setting ============
 
-    ISolidlyRouter.Route[] public outputToNativeRoute;
+    // ISolidlyRouter.Route[] public outputToNativeRoute;
 
-    ISolidlyRouter.Route[] public outputToLp0Route;
+    // ISolidlyRouter.Route[] public outputToLp0Route;
 
-    ISolidlyRouter.Route[] public outputToLp1Route;
+    // ISolidlyRouter.Route[] public outputToLp1Route;
 
-    mapping(address => ISolidlyRouter.Route[]) public bonusToNativeRoutes;
-
-    bool public stable;
+    // bool public stable;
     /**
      * @dev This empty reserved space is put in place to allow future versions to add new
      * variables without shifting down storage in the inheritance chain.

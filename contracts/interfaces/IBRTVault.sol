@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.18;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 interface IBRTVault is IERC20 {
 
     function updateRewards() external;
+
+    function deposit(uint256 _assets, address _receiver) external returns (uint256);
+
+    function redeem(uint256 _shares, address _receiver, address _owner) external returns (uint256);
+
+    function compound() external;
 
     function checkReward() external view returns (uint256);
     

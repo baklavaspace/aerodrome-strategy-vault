@@ -136,6 +136,9 @@ contract RewardDistributor is Initializable, UUPSUpgradeable, Governable {
         trackerInfo[_tid].allocPoint = _allocPoint;
     }
 
+    /**
+     * @dev Need to make sure all rewardTracker contracts fully migrate rewardToken to new rewardToken after update this contract rewardToken address
+     */
     function updateRewardToken(address _rewardToken) external onlyRole(GOVERNOR_ROLE) {
         rewardToken = _rewardToken;
     }

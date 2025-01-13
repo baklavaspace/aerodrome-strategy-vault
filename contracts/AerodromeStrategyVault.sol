@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.18;
 
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 import {IVelodromeGauge} from "./interfaces/aerodrome/IVelodromeGauge.sol";
 import {ISolidlyRouter} from "./interfaces/aerodrome/ISolidlyRouter.sol";
@@ -52,7 +52,6 @@ contract AerodromeStrategyVault is
     function initVault(
         address _stakingContract,
         address _poolRewardToken,
-        IERC20[] memory _bonusRewardTokens,
         address _router,
         address _feeTreasury,
         address _distributor,
@@ -64,7 +63,6 @@ contract AerodromeStrategyVault is
 
         stakingContract = IVelodromeGauge(_stakingContract);
         poolRewardToken = IERC20(_poolRewardToken);
-        bonusRewardTokens = _bonusRewardTokens;
         router = ISolidlyRouter(_router);
         feeTreasury = _feeTreasury;
         distributor = _distributor;
@@ -83,7 +81,6 @@ contract AerodromeStrategyVault is
         }
 
         depositsEnabled = true;
-        restakingEnabled = true;
     }
 
     /**
@@ -91,18 +88,12 @@ contract AerodromeStrategyVault is
      */
     function approveAllowances(uint256 _amount) external onlyRole(GOVERNOR_ROLE) {
         address depositToken = asset();
-        if (address(stakingContract) != address(0)) {
-            IERC20(depositToken).approve(
-                address(stakingContract),
-                _amount
-            );
-        }
 
         if (address(router) != address(0)) {
             IERC20(WETH).approve(address(router), _amount);
             IERC20(ISolidlyPair(depositToken).token0()).approve(address(router), _amount);
             IERC20(ISolidlyPair(depositToken).token1()).approve(address(router), _amount);
-            IERC20(depositToken).approve(address(router), _amount);
+            // IERC20(depositToken).approve(address(router), _amount);
             poolRewardToken.approve(address(router), _amount);
 
             uint256 rewardLength = bonusRewardTokens.length;
@@ -129,11 +120,9 @@ contract AerodromeStrategyVault is
 
         uint256 shares = super.deposit(_assets, _receiver);
 
-        if (restakingEnabled == true) {
-            uint256 stakeAmount = IERC20(asset()).balanceOf(address(this));
-            _depositTokens(stakeAmount);
-        }
-
+        uint256 stakeAmount = IERC20(asset()).balanceOf(address(this));
+        _depositTokens(stakeAmount);
+        
         return shares;
     }
 
@@ -154,35 +143,10 @@ contract AerodromeStrategyVault is
             assets = super.redeem(_shares, _receiver, _owner);
         }
 
-        if (restakingEnabled == true) {
-            uint256 stakeAmount = IERC20(asset()).balanceOf(address(this));
-            _depositTokens(stakeAmount);
-        }
+        uint256 stakeAmount = IERC20(asset()).balanceOf(address(this));
+        _depositTokens(stakeAmount);
 
         return assets;
-    }
-
-    // EMERGENCY ONLY. Withdraw without caring about rewards.
-    // This has the 25% fee withdrawals fees and ucer receipt record set to 0 to prevent abuse of thisfunction.
-    function emergencyRedeem() external nonReentrant {
-        Types.UserInfo storage user = userInfo[msg.sender];
-        uint256 userBRTAmount = balanceOf(msg.sender);
-
-        require(userBRTAmount > 0, "#>0");
-
-        _updateRewards(msg.sender);
-        user.claimableReward = 0;
-
-        // Reordered from Sushi function to prevent risk of reentrancy
-        uint256 assets = _convertToAssets(userBRTAmount, Math.Rounding.Floor);
-        assets -= (assets * 2500) / BIPS_DIVISOR;
-
-        _withdrawTokens(assets);
-
-        _burn(msg.sender, userBRTAmount);
-        IERC20(asset()).safeTransfer(address(msg.sender), assets);
-
-        emit EmergencyWithdraw(msg.sender, assets, userBRTAmount);
     }
 
     function compound() external nonReentrant {
@@ -191,9 +155,7 @@ contract AerodromeStrategyVault is
 
         uint256 liquidity = _compound();
 
-        if (restakingEnabled == true) {
-            _depositTokens(liquidity);
-        }
+        _depositTokens(liquidity);
     }
 
     // Update reward variables of the given vault to be up-to-date.
@@ -209,6 +171,7 @@ contract AerodromeStrategyVault is
     // Deposit LP token to 3rd party restaking farm
     function _depositTokens(uint256 amount) internal {
         if(amount > 0) {
+            IERC20(asset()).approve(address(stakingContract), amount);
             stakingContract.deposit(
                 amount,
                 address(this)
@@ -347,7 +310,6 @@ contract AerodromeStrategyVault is
 
         if (depositsEnabled == true && disableDeposits == true) {
             updateDepositsEnabled(false);
-            updateRestakingEnabled(false);
         }
         emit EmergencyWithdrawVault(msg.sender, disableDeposits);
     }
@@ -359,15 +321,9 @@ contract AerodromeStrategyVault is
         emit DepositsEnabled(newValue);
     }
 
-    function updateRestakingEnabled(bool newValue) public onlyRole(OWNER_ROLE) {
-        require(restakingEnabled != newValue);
-        restakingEnabled = newValue;
-        emit RestakingEnabled(newValue);
-    }
-
     /**************************************** ONLY AUTHORIZED FUNCTIONS ****************************************/
 
-    function updateStackingGauge(address _stakingContract)
+    function updateStakingGauge(address _stakingContract)
         public
         onlyRole(GOVERNOR_ROLE)
     {
@@ -384,13 +340,6 @@ contract AerodromeStrategyVault is
         feeOnWithdrawal = _strategySettings.feeOnWithdrawal;
     }
 
-    function updateBonusReward(IERC20[] memory _bonusRewardTokens)
-        public
-        onlyRole(GOVERNOR_ROLE)
-    {
-        bonusRewardTokens = _bonusRewardTokens;
-    }
-
     function updateFeeTreasury(address _feeTreasury)
         public
         onlyRole(GOVERNOR_ROLE)
@@ -403,6 +352,22 @@ contract AerodromeStrategyVault is
         onlyRole(GOVERNOR_ROLE)
     {
         distributor = _distributor;
+    }
+
+    function updateBonusReward(IERC20 _bonusRewardTokens, ISolidlyRouter.Route[] calldata _bonusToNativeRoute, bool _clearBonusToken)
+        public
+        onlyRole(GOVERNOR_ROLE)
+    {
+        if (_clearBonusToken == true) {
+            delete bonusRewardTokens;
+        }
+        
+        bonusRewardTokens.push(_bonusRewardTokens);
+        
+        delete bonusToNativeRoutes[address(_bonusRewardTokens)];
+        for (uint i; i < _bonusToNativeRoute.length; ++i) {
+            bonusToNativeRoutes[address(_bonusRewardTokens)].push(_bonusToNativeRoute[i]);
+        }
     }
 
     function updateRoute(
@@ -433,7 +398,7 @@ contract AerodromeStrategyVault is
     }
 
 
-    /*********************** Compound Strategy ************************************************************************
+    /*********************** Compound Strategy *****************************************************************************
      * Swap all reward tokens to WETH and swap half/half WETH token to both LP token0 & token1, Add liquidity to LP token
      ***********************************************************************************************************************/
 
@@ -448,40 +413,45 @@ contract AerodromeStrategyVault is
 
         IERC20(WETH).safeTransfer(feeTreasury, protocolFee);
         IERC20(WETH).safeTransfer(msg.sender, reinvestFee);
-
         uint256 liquidity = _convertWETHToDepositToken(wethAmount - reinvestFee - protocolFee);
 
         return liquidity;
     }
 
-    function _convertRewardIntoWETH() private {
+    function _convertRewardIntoWETH() private  returns (uint256) {
         // Variable reward Super farm strategy
         uint256 rewardBal;
+        uint256 swapWeth;
 
         if (address(poolRewardToken) != address(WETH)) {
             rewardBal = poolRewardToken.balanceOf(address(this));
             if (rewardBal > 0) {
-                _convertExactTokentoToken(outputToNativeRoute, rewardBal);
+                swapWeth = _convertExactTokentoToken(outputToNativeRoute, rewardBal);
             }
         }
+        return swapWeth;
     }
 
-    function _convertBonusRewardIntoWETH() private {
+    function _convertBonusRewardIntoWETH() private returns (uint256) {
         uint256 rewardLength = bonusRewardTokens.length;
+        uint256 swapWeth;
 
+        // Variable reward Super farm strategy
         if (rewardLength > 0) {
-            // Variable reward Super farm strategy
-            uint256 rewardBal;
-
             for (uint256 i; i < rewardLength; i++) {
+                uint256 rewardBal = 0;
+
                 if (address(bonusRewardTokens[i]) != address(WETH)) {
-                    rewardBal = bonusRewardTokens[i].balanceOf(address(this));
+                    ISolidlyRouter.Route[] memory bonusToNativeRoute = bonusToNativeRoutes[address(bonusRewardTokens[i])];
+                    rewardBal = IERC20(bonusRewardTokens[i]).balanceOf(address(this));
+
                     if (rewardBal > 0) {
-                        _convertExactTokentoToken(outputToNativeRoute, rewardBal);
+                        swapWeth += _convertExactTokentoToken(bonusToNativeRoute, rewardBal);
                     }
                 }
             }
         }
+        return swapWeth;
     }
 
     function _convertWETHToDepositToken(uint256 amount)
@@ -489,28 +459,43 @@ contract AerodromeStrategyVault is
         returns (uint256)
     {
         require(amount > 0, "#<0");
-        uint256 amountIn = amount / 2;
-        address depositToken = asset();
-        address lpToken0 = ISolidlyPair(address(depositToken)).token0();
-        address lpToken1 = ISolidlyPair(address(depositToken)).token1();
+        uint256 amountIn0 = amount / 2;
+        uint256 amountIn1 = amount - amountIn0;
+
+        uint256 amountOutToken0 = amountIn0;
+        uint256 amountOutToken1 = amountIn1;
+
+        address lpToken0 = ISolidlyPair(asset()).token0();
+        address lpToken1 = ISolidlyPair(asset()).token1();
+        address factory = ISolidlyPair(asset()).factory();
         
+        if (stable) {
+            uint256 lp0Decimals = 10**IERC20Metadata(lpToken0).decimals();
+            uint256 lp1Decimals = 10**IERC20Metadata(lpToken1).decimals();
+            amountOutToken0 = lpToken0 != WETH ? router.getAmountsOut(amountIn0, outputToLp0Route)[outputToLp0Route.length] * 1e18 / lp0Decimals : amountIn0;
+            amountOutToken1 = lpToken1 != WETH ? router.getAmountsOut(amountIn1, outputToLp1Route)[outputToLp1Route.length] * 1e18 / lp1Decimals  : amountIn1;
+            (uint256 amountA, uint256 amountB,) = router.quoteAddLiquidity(lpToken0, lpToken1, stable, factory, amountOutToken0, amountOutToken1);
+            amountA = amountA * 1e18 / lp0Decimals;
+            amountB = amountB * 1e18 / lp1Decimals;
+            uint256 ratio = amountOutToken0 * 1e18 / amountOutToken1 * amountB / amountA;
+            amountIn0 = amount * 1e18 / (ratio + 1e18);
+            amountIn1 = amount - amountIn0;
+        }
+
         // swap to token0
-        uint256 amountOutToken0 = amountIn;
         // Check if lpToken0 equal to WETH
         if (lpToken0 != (WETH)) {
-            amountOutToken0 = _convertExactTokentoToken(outputToLp0Route, amountIn);
+            amountOutToken0 = _convertExactTokentoToken(outputToLp0Route, amountIn0);
         }
 
         // swap to token1
-        uint256 amountOutToken1 = amount - amountIn;
         // Check if lpToken1 equal to WETH
         if (lpToken1 != (WETH)) {
-            amountOutToken1 = _convertExactTokentoToken(outputToLp1Route, amountIn);
+            amountOutToken1 = _convertExactTokentoToken(outputToLp1Route, amountIn1);
         }
 
         // Add liquidity
         (, , uint256 liquidity) = router.addLiquidity(lpToken0, lpToken1, stable, amountOutToken0, amountOutToken1, 1, 1, address(this), block.timestamp + 1200);
-
         return liquidity;
     }
 
@@ -561,4 +546,4 @@ contract AerodromeStrategyVault is
         );
         __UUPSUpgradeable_init();
     }
-}        
+}
